@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE hibernate-configuration PUBLIC "-//Hibernate/Hibernate Configuration DTD 3.0//EN"
-        "http://hibernate.sourceforge.net/hibernate-configuration-3.0.dtd">
+        "http://www.hibernate.org/hibernate-configuration-3.0.dtd">
 
 <hibernate-configuration>
     <session-factory>
         <property name="show_sql">true</property>
         <property name="format_sql">true</property>
-        <property name="dialect">org.hibernate.dialect.SQLiteDialect</property>
+        <property name="dialect">com.enigmabridge.hibernate.dialect.SQLiteDialect</property>
         <property name="connection.driver_class">org.sqlite.JDBC</property>
+        <property name="hibernate.connection.autocommit">true</property>
 
         <property name="hibernate.hbm2ddl.auto">update</property>
 
-        <mapping class="com.srccodes.example.hibernate.Contact"/>
+        <mapping class="paperless.Tag"/>
+        <mapping class="paperless.Note"/>
+        <mapping class="paperless.Notebook"/>
     </session-factory>
 </hibernate-configuration>
