@@ -1,8 +1,10 @@
 package paperless
 
 import org.hibernate.SessionFactory
+import org.hibernate.annotations.NaturalId
 import org.hibernate.annotations.UpdateTimestamp
 import org.hibernate.cfg.Configuration
+import java.io.Closeable
 import java.io.File
 import java.time.ZonedDateTime
 import javax.persistence.*
@@ -22,28 +24,68 @@ class Tag(@Id var name:String, @m2o var parent: Tag?, var isExpanded:Boolean = f
 
 @e
 @Table(indexes = [Index(columnList = "createTime")])
-class Note(var name:String, @m2o val notebook: Notebook) {
+class Note(var title:String, @m2o val notebook: Notebook) {
     @Id @GeneratedValue val id = 0
     @m2m val tags:MutableSet<Tag> = mutableSetOf()
     var createTime = ZonedDateTime.now()
     @UpdateTimestamp var updateTime = ZonedDateTime.now()
+    var content = ""
 }
 
 @e
-class Notebook(var name:String) {
+class Notebook(@NaturalId var name:String) {
     @Id @GeneratedValue val id = 0
     @o2m(mappedBy = "notebook") val notes:MutableSet<Note> = mutableSetOf()
 }
 
-class Paperless(val location:String) {
+class Paperless(location:String):Closeable {
+    override fun close() {
+        //session.flush()
+        session.close()
+        factory.close()
+    }
+
     private val dbLocation = File(File(location).also {it.mkdirs()}, "paperless.sqlite")
     private val factory:SessionFactory = Configuration().configure().also { it.setProperty("hibernate.connection.url", "jdbc:sqlite:${dbLocation.toURI()}")}.buildSessionFactory()
+    private val session = factory.openSession()
     fun addTags(tags:Collection<Tag>) {
-        factory.openSession().use { session ->
-            val t = session.beginTransaction()
-            tags.forEach { session.saveOrUpdate(it) }
-            t.commit()
-        }
+        val t = session.beginTransaction()
+        tags.forEach { session.saveOrUpdate(it) }
+        t.commit()
     }
     fun disconnect() = factory.close()
+
+    fun autosave(o:Any) {
+        val t = session.beginTransaction()
+        session.save(o)
+        t.commit()
+    }
+
+    fun notebook(name:String) : Notebook {
+        val n = session.byNaturalId(Notebook::class.java).using("name", name).loadOptional()
+        return if (n.isPresent) n.get() else  Notebook(name).also { autosave(it) }
+        /*val criteriaBuilder = session.criteriaBuilder
+        val param = criteriaBuilder.parameter(String::class.java)
+        val criteriaQuery = criteriaBuilder.createQuery(Notebook::class.java).run {
+            val root = from(Notebook::class.java)
+            select(root)
+            where(criteriaBuilder.equal(root.get<String>("name"), param))
+        }
+        val query = session.createQuery(criteriaQuery)
+        query.setParameter(param, name)
+        var rs = query.resultList
+        if (rs.isEmpty()) {
+            return Notebook(name).also {session.persist(it) }
+        }
+        return rs[0]*/
+    }
+
+    fun addNote(note:Note) {
+        autosave(note)
+    }
+
+    fun getOrAddTag(tag: String): Tag {
+        val t = session.byId(Tag::class.java).loadOptional(tag)
+        return t.orElseGet { Tag(tag, null).also {autosave(it) } }
+    }
 }

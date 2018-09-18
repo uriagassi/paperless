@@ -22,7 +22,7 @@ dependencies {
 
     compile("com.enigmabridge:hibernate4-sqlite-dialect:0.1.2")
     compile("org.xerial:sqlite-jdbc:3.23.1")
-    compile("stax:stax:+")
+    compile("stax:stax:1.2.0")
     testCompile("junit", "junit", "4.12")
 }
 
