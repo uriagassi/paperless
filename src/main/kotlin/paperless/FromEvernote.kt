@@ -5,6 +5,7 @@ import java.io.FileInputStream
 import java.sql.DriverManager
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.*
 import javax.xml.stream.XMLEventReader
 import javax.xml.stream.XMLInputFactory
 
@@ -47,49 +48,60 @@ fun importTagsFromEvernote(location: String, targetLocation: String): Collection
     return roots
 }
 
+class ImportedAttachment {
+    var fileName:String=""
+    var data:ByteArray = ByteArray(0)
+    var mime:String=""
+}
+
 fun importNotesFromEnex(fileLocation:String,targetLocation: String) {
     val dateFormat = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssVV")
     val factory = XMLInputFactory.newFactory()
+    val attachmentParameters = mutableSetOf<String>()
     Paperless(targetLocation).use {
         val notebook = it.notebook("Archive")
-        fun parseContent(reader: XMLEventReader):String {
-            while(reader.hasNext()) {
-                val event = reader.nextEvent()
-                if (event.isEndElement && event.asEndElement().name.localPart == "content") {
-                    break;
+        fun extractAttachment(reader: XMLEventReader, note:Note):Attachment {
+            val attachment = ImportedAttachment()
+            reader.readElement("resource") { n, _ ->
+                when (n) {
+                    "data" -> attachment.data = Base64.getDecoder().decode(reader.elementText.replace("\n", ""))
+                    "mime" -> attachment.mime = reader.elementText
+                    "file-name" -> attachment.fileName = reader.elementText
+                    "source-url" -> if (attachment.fileName.isEmpty()) attachment.fileName = reader.elementText.substringAfterLast('/')
                 }
             }
-            return ""
+            if (attachment.fileName.isEmpty())
+                attachment.fileName = note.title + "." + attachment.mime.substringAfterLast('/')
+            attachment.fileName =attachment.fileName.replace("""[\\/:"*?<>|&=;]+""".toRegex(),"_").take(50)
+            val uniqueFileName = if (File(it.attachmentDir, attachment.fileName).exists())
+                attachment.fileName.run { substringBeforeLast('.') + System.currentTimeMillis() + "." + substringAfterLast('.') }
+            else attachment.fileName
+
+            File(it.attachmentDir, uniqueFileName).writeBytes(attachment.data)
+            return Attachment(attachment.fileName, uniqueFileName, attachment.mime, note).also { a -> it.addAttachment(a) }
         }
         fun parseNote(reader: XMLEventReader) {
             val note = Note("", notebook)
-            while(reader.hasNext()) {
-                val event = reader.nextEvent()
-                if (event.isEndElement && event.asEndElement().name.localPart == "note") {
-                    it.addNote(note)
-                    return
-                }
-                if (event.isStartElement) {
-                    when (event.asStartElement().name.localPart) {
-                        "title" -> note.title = reader.elementText
-                        "content" -> note.content = reader.elementText
-                        "tag" ->  note.tags.add(it.getOrAddTag(reader.elementText))
-                        "created" -> note.createTime = ZonedDateTime.parse(reader.elementText, dateFormat)
-                        "updated" -> note.updateTime = ZonedDateTime.parse(reader.elementText, dateFormat)
-                    }
+            reader.readElement("note") { name, _ ->
+                when (name) {
+                    "title" -> note.title = reader.elementText
+                    "content" -> note.content = reader.elementText
+                    "tag" ->  note.tags.add(it.getOrAddTag(reader.elementText))
+                    "created" -> note.createTime = ZonedDateTime.parse(reader.elementText, dateFormat)
+                    "updated" -> note.updateTime = ZonedDateTime.parse(reader.elementText, dateFormat)
+                    "resource" -> note.attachments.add(extractAttachment(reader, note))
                 }
             }
+            it.addNote(note)
         }
 
         FileInputStream(fileLocation).use { stream ->
             val reader = factory.createXMLEventReader(stream)
-            while (reader.hasNext()) {
-                val event = reader.nextEvent()
-                if (event.isStartElement && event.asStartElement().name.localPart =="note") {
-                    parseNote(reader)
-                }
+            reader.readElement { name, _ ->
+                if (name == "note") parseNote(reader)
             }
         }
+        println(attachmentParameters)
     }
 }
 

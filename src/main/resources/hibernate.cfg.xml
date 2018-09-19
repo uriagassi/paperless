@@ -16,5 +16,6 @@
         <mapping class="paperless.Tag"/>
         <mapping class="paperless.Note"/>
         <mapping class="paperless.Notebook"/>
+        <mapping class="paperless.Attachment"/>
     </session-factory>
 </hibernate-configuration>

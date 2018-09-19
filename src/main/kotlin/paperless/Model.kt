@@ -30,6 +30,17 @@ class Note(var title:String, @m2o val notebook: Notebook) {
     var createTime = ZonedDateTime.now()
     @UpdateTimestamp var updateTime = ZonedDateTime.now()
     var content = ""
+    @o2m(mappedBy = "note") val attachments = mutableListOf<Attachment>()
+}
+
+@e
+class Attachment(
+    val fileName:String,
+    val uniqueFileName:String,
+    val mime:String,
+    @m2o val note:Note) {
+    @Id @GeneratedValue val id = 0
+
 }
 
 @e
@@ -40,12 +51,12 @@ class Notebook(@NaturalId var name:String) {
 
 class Paperless(location:String):Closeable {
     override fun close() {
-        //session.flush()
         session.close()
         factory.close()
     }
 
     private val dbLocation = File(File(location).also {it.mkdirs()}, "paperless.sqlite")
+    val attachmentDir = File(File(location), "attachments").also{it.mkdirs()}
     private val factory:SessionFactory = Configuration().configure().also { it.setProperty("hibernate.connection.url", "jdbc:sqlite:${dbLocation.toURI()}")}.buildSessionFactory()
     private val session = factory.openSession()
     fun addTags(tags:Collection<Tag>) {
@@ -80,12 +91,20 @@ class Paperless(location:String):Closeable {
         return rs[0]*/
     }
 
-    fun addNote(note:Note) {
-        autosave(note)
+    fun startAddingNotes() {
+        session.beginTransaction()
     }
+    fun addNote(note:Note) {
+        session.save(note)
+    }
+
 
     fun getOrAddTag(tag: String): Tag {
         val t = session.byId(Tag::class.java).loadOptional(tag)
         return t.orElseGet { Tag(tag, null).also {autosave(it) } }
+    }
+
+    fun addAttachment(a: Attachment) {
+        session.persist(a)
     }
 }
