@@ -1,11 +1,18 @@
 package paperless
 
+import com.sun.javafx.property.adapter.JavaBeanQuickAccessor.createReadOnlyJavaBeanObjectProperty
+import javafx.beans.property.ObjectProperty
+import javafx.beans.property.ReadOnlyObjectProperty
+import javafx.collections.ObservableList
 import org.hibernate.SessionFactory
+import org.hibernate.Transaction
 import org.hibernate.annotations.NaturalId
 import org.hibernate.annotations.UpdateTimestamp
 import org.hibernate.cfg.Configuration
+import tornadofx.observable
 import java.io.Closeable
 import java.io.File
+import java.lang.ref.WeakReference
 import java.time.ZonedDateTime
 import javax.persistence.*
 
@@ -14,23 +21,57 @@ typealias m2m = ManyToMany
 typealias m2o = ManyToOne
 typealias o2m = OneToMany
 
+interface NoteHolder {val name: String; val notes: MutableList<Note> }
+
+class ObservableCache<T:Any>(private val model:T) {
+    private val cache = mutableMapOf<String, ObjectProperty<Any>>()
+    private val readonlyCache = mutableMapOf<Any, ObservableList<Any>>()
+
+    fun <R: Any> get(propName: String) = cache.getOrPut(propName) {
+        model.observable(propName)
+    } as ObjectProperty<R>
+
+    fun <R:Any> getList(source:List<R>) = readonlyCache.getOrPut(source) {
+        source.observable()
+    } as ObservableList<R>
+}
+
 @e
-class Tag(@Id var name:String, @m2o var parent: Tag?, var isExpanded:Boolean = false) {
-    @m2m(mappedBy = "tags") val notes:MutableSet<Note> = mutableSetOf()
+class Tag(@Id override var name:String, @m2o var parent: Tag?, var isExpanded:Boolean = false) : NoteHolder {
+    @m2m(mappedBy = "tags") override val notes:MutableList<Note> = mutableListOf()
     @o2m(mappedBy = "parent") val children:MutableSet<Tag> = mutableSetOf()
-    override fun toString() = toString(0)
-    private fun toString(indent:Int):String = "${" ".repeat(indent)}$name (0) ${children.joinToString("\n") { it.toString(indent+1)}}"
+    override fun toString() = name
 }
 
 @e
 @Table(indexes = [Index(columnList = "createTime")])
-class Note(var title:String, @m2o val notebook: Notebook) {
+class Note(
+        @m2o var notebook: Notebook) {
+    var title:String = ""
+        set(value:String) {
+            field = value
+            fireOnChange()
+        }
     @Id @GeneratedValue val id = 0
-    @m2m val tags:MutableSet<Tag> = mutableSetOf()
+    @m2m val tags:MutableList<Tag> = mutableListOf()
     var createTime = ZonedDateTime.now()
     @UpdateTimestamp var updateTime = ZonedDateTime.now()
     var content = ""
     @o2m(mappedBy = "note") val attachments = mutableListOf<Attachment>()
+    @Transient private var listeners = mutableListOf<WeakReference<(Note)->Unit>>()
+    @Transient val observableCache = ObservableCache(this)
+        get() {
+        if (field ==null) field = ObservableCache(this)
+        return field
+    }
+    private fun fireOnChange() {
+        listeners?.forEach { it.get()?.invoke(this) }
+        listeners?.removeIf { it.get() == null }
+    }
+    fun addListener(listener: (Note)->Unit) {
+        if (listeners == null) listeners = mutableListOf()
+        listeners.add(WeakReference(listener))
+    }
 }
 
 @e
@@ -44,19 +85,23 @@ class Attachment(
 }
 
 @e
-class Notebook(@NaturalId var name:String) {
+class Notebook(@NaturalId override var name:String) : NoteHolder {
     @Id @GeneratedValue val id = 0
-    @o2m(mappedBy = "notebook") val notes:MutableSet<Note> = mutableSetOf()
+    @o2m(mappedBy = "notebook") override val notes:MutableList<Note> = mutableListOf()
+    override fun toString() = name
 }
 
 class Paperless(location:String):Closeable {
+    var transaction: Transaction?=null
     override fun close() {
+        transaction?.commit()
         session.close()
         factory.close()
     }
 
-    private val dbLocation = File(File(location).also {it.mkdirs()}, "paperless.sqlite")
-    val attachmentDir = File(File(location), "attachments").also{it.mkdirs()}
+    val baseDir = File(location).also { it.mkdirs() }
+    private val dbLocation = File(baseDir, "paperless.sqlite")
+    val attachmentDir = File(baseDir, "attachments").also{it.mkdirs()}
     private val factory:SessionFactory = Configuration().configure().also { it.setProperty("hibernate.connection.url", "jdbc:sqlite:${dbLocation.toURI()}")}.buildSessionFactory()
     private val session = factory.openSession()
     fun addTags(tags:Collection<Tag>) {
@@ -71,6 +116,8 @@ class Paperless(location:String):Closeable {
         session.save(o)
         t.commit()
     }
+
+    val defaultNotebook by lazy { notebook("Archive") }
 
     fun notebook(name:String) : Notebook {
         val n = session.byNaturalId(Notebook::class.java).using("name", name).loadOptional()
@@ -92,11 +139,16 @@ class Paperless(location:String):Closeable {
     }
 
     fun startAddingNotes() {
-        session.beginTransaction()
+        transaction = session.beginTransaction()
     }
     fun addNote(note:Note) {
         session.save(note)
     }
+
+    fun getRootTags() : List<Tag> {
+        return session.createQuery("from Tag t where t.parent is null order by name").list() as List<Tag>
+    }
+
 
 
     fun getOrAddTag(tag: String): Tag {
@@ -107,4 +159,17 @@ class Paperless(location:String):Closeable {
     fun addAttachment(a: Attachment) {
         session.persist(a)
     }
+
+    fun getNotebooks(): List<Notebook> {
+        return session.createQuery("from Notebook").list() as List<Notebook>
+    }
+
+    fun expand(tag: Tag, isExpanded: Boolean = true) {
+        if (tag.isExpanded == isExpanded) return
+       transaction = transaction ?: session.beginTransaction()
+        tag.isExpanded = isExpanded
+        session.update(tag)
+        session.flush()
+    }
+
 }

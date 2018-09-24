@@ -1,0 +1,25 @@
+.mnemonic-underline {
+    -fx-stroke: -fx-text-fill;
+}
+
+.list-note-title {
+    -fx-wrap-text: true;
+}
+.list-note-create-time {
+    -fx-text-fill: blue;
+}
+.list-note-tags {
+    -fx-text-overrun: ellipsis;
+    -fx-text-fill: blue;
+}
+.list-note-attachments {
+    -fx-text-fill: grey;
+}
+
+.tag-count {
+    -fx-text-fill: grey;
+}
+
+.tag-header {
+    -fx-font-weight: bold;
+}

@@ -11,8 +11,8 @@ import javax.xml.stream.XMLInputFactory
 
 
 fun main(args:Array<String>) {
-    //importTagsFromEvernote(args[0], args[1])
-    importNotesFromEnex(args[0], args[1])
+    importTagsFromEvernote(args[0], args[1])
+    //importNotesFromEnex(args[0], args[1])
 }
 
 fun importTagsFromEvernote(location: String, targetLocation: String): Collection<Tag> {
@@ -59,7 +59,7 @@ fun importNotesFromEnex(fileLocation:String,targetLocation: String) {
     val factory = XMLInputFactory.newFactory()
     val attachmentParameters = mutableSetOf<String>()
     Paperless(targetLocation).use {
-        val notebook = it.notebook("Archive")
+        val notebook = it.defaultNotebook
         fun extractAttachment(reader: XMLEventReader, note:Note):Attachment {
             val attachment = ImportedAttachment()
             reader.readElement("resource") { n, _ ->
@@ -81,7 +81,7 @@ fun importNotesFromEnex(fileLocation:String,targetLocation: String) {
             return Attachment(attachment.fileName, uniqueFileName, attachment.mime, note).also { a -> it.addAttachment(a) }
         }
         fun parseNote(reader: XMLEventReader) {
-            val note = Note("", notebook)
+            val note = Note(notebook)
             reader.readElement("note") { name, _ ->
                 when (name) {
                     "title" -> note.title = reader.elementText
