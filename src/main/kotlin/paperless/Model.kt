@@ -21,7 +21,14 @@ typealias m2m = ManyToMany
 typealias m2o = ManyToOne
 typealias o2m = OneToMany
 
-interface NoteHolder {val name: String; val notes: MutableList<Note> }
+abstract class WithObservableCache {
+    @Transient val observableCache = ObservableCache(this)
+        get() {
+            if (field ==null) field = ObservableCache(this)
+            return field
+        }
+}
+abstract class NoteHolder:WithObservableCache() {abstract val name: String; abstract val notes: MutableList<Note> }
 
 class ObservableCache<T:Any>(private val model:T) {
     private val cache = mutableMapOf<String, ObjectProperty<Any>>()
@@ -37,7 +44,7 @@ class ObservableCache<T:Any>(private val model:T) {
 }
 
 @e
-class Tag(@Id override var name:String, @m2o var parent: Tag?, var isExpanded:Boolean = false) : NoteHolder {
+class Tag(@Id override var name:String, @m2o var parent: Tag?, var isExpanded:Boolean = false) : NoteHolder() {
     @m2m(mappedBy = "tags") override val notes:MutableList<Note> = mutableListOf()
     @o2m(mappedBy = "parent") val children:MutableSet<Tag> = mutableSetOf()
     override fun toString() = name
@@ -46,32 +53,14 @@ class Tag(@Id override var name:String, @m2o var parent: Tag?, var isExpanded:Bo
 @e
 @Table(indexes = [Index(columnList = "createTime")])
 class Note(
-        @m2o var notebook: Notebook) {
+        @m2o var notebook: Notebook) : WithObservableCache() {
     var title:String = ""
-        set(value:String) {
-            field = value
-            fireOnChange()
-        }
     @Id @GeneratedValue val id = 0
     @m2m val tags:MutableList<Tag> = mutableListOf()
     var createTime = ZonedDateTime.now()
     @UpdateTimestamp var updateTime = ZonedDateTime.now()
     var content = ""
     @o2m(mappedBy = "note") val attachments = mutableListOf<Attachment>()
-    @Transient private var listeners = mutableListOf<WeakReference<(Note)->Unit>>()
-    @Transient val observableCache = ObservableCache(this)
-        get() {
-        if (field ==null) field = ObservableCache(this)
-        return field
-    }
-    private fun fireOnChange() {
-        listeners?.forEach { it.get()?.invoke(this) }
-        listeners?.removeIf { it.get() == null }
-    }
-    fun addListener(listener: (Note)->Unit) {
-        if (listeners == null) listeners = mutableListOf()
-        listeners.add(WeakReference(listener))
-    }
 }
 
 @e
@@ -85,7 +74,7 @@ class Attachment(
 }
 
 @e
-class Notebook(@NaturalId override var name:String) : NoteHolder {
+class Notebook(@NaturalId override var name:String) : NoteHolder() {
     @Id @GeneratedValue val id = 0
     @o2m(mappedBy = "notebook") override val notes:MutableList<Note> = mutableListOf()
     override fun toString() = name

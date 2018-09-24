@@ -6,6 +6,7 @@ import javafx.beans.binding.StringBinding
 import javafx.beans.property.Property
 import javafx.beans.property.SimpleListProperty
 import javafx.beans.property.SimpleObjectProperty
+import javafx.beans.value.ObservableValue
 import javafx.collections.transformation.SortedList
 import javafx.geometry.Orientation
 import javafx.scene.control.TreeItem
@@ -66,19 +67,24 @@ class PaperlessView : View() {
             treeview<Any?> {
                 root = TreeItem()
                 isShowRoot = false
-                cellFormat {
-                    graphic = cache(it ?: "") {
-                        hbox {
-                            when (it) {
+                cellFormat { i ->
+                    graphic =
+                            when (i) {
                                 is NoteHolder -> {
-                                    label(it.name) { styleClass.add("tag-title") }
-                                    if (it.notes.isNotEmpty()) {
-                                        label("(${it.notes.size})") { styleClass.add("tag-count") }
+                                    cache ("tag") {
+                                        hbox {
+                                            label(itemProperty().select { n-> (n as? NoteHolder)?.observableCache?.get<String>("name")
+                                                    ?: SimpleObjectProperty() }) { styleClass.add("tag-title") }
+                                            label(itemProperty().select { n ->
+                                                if (n is NoteHolder) n.observableCache.getList(n.notes).run {
+                                                    Bindings.createStringBinding(Callable { if (isNotEmpty()) "($size)" else "" },
+                                                            this, itemProperty()) as ObservableValue<String>
+                                                } else SimpleObjectProperty()
+                                            }) { styleClass.add("tag-count") }
+                                        }
                                     }
                                 }
-                                else -> label(it!!.toString()) { styleClass.add("tag-header") }
-                            }
-                        }
+                                else -> cache("header") { label(itemProperty().asString()) { styleClass.add("tag-header") } }
                     }
                     /*text = when (it) {
                         is NoteHolder -> it.name + if (it.notes.isEmpty()) "" else " (${it.notes.size})"
